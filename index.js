@@ -6,14 +6,23 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // 🔹 Memoria temporal (MVP)
 const users = {};
 
+// 🔹 Token de WhatsApp desde .env
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_ID = process.env.PHONE_ID; // tu ID de número de WhatsApp
+
+if (!WHATSAPP_TOKEN || !PHONE_ID) {
+  console.error("❌ Debes configurar WHATSAPP_TOKEN y PHONE_ID en tu .env o variables de entorno");
+  process.exit(1);
+}
+
 // 🔹 Webhook verificación (Meta)
 app.get("/webhook", (req, res) => {
-  const VERIFY_TOKEN = "EAAUMzUbReZB0BQvcf0ZBVC4wBJquksaElfvLn8tkp49EZBxtLHiqL72QY319GJZC1CIPLX2TMWLZBQaaNHqDZCjlJRjZBwiZBCDE5xzcL1TOlhT9kZB2hScPazM7WqwPwefrvOEDPZCzRKzXmg32R49YKJhhNqR9PfAjJhKnYX3DUfCIV8ZADRxf14hF6Ga2ryZCFOFsJAZDZD";
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN; // también en .env
 
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -141,16 +150,16 @@ app.post("/webhook", async (req, res) => {
         resumen += `• ${prod}: ${user.cantidades[prod]} paquetes\n`;
       }
 
+      // 🔹 Enviar a Google Sheets
       await axios.post(
-  "https://script.google.com/macros/s/AKfycbxUCeph4iNFmHbOjl2PgumsN_QO4G-ARMwDUDRU2LL7ACGCJKvtahT3lhSwz3lJPhk95g/exec",
-  {
-    nombre: user.nombre,
-    telefono: user.telefono,
-    pedido: user.cantidades,
-    fechaEntrega: user.fecha
-  }
-);
-
+        process.env.GOOGLE_SHEET_WEBHOOK,
+        {
+          nombre: user.nombre,
+          telefono: user.telefono,
+          pedido: user.cantidades,
+          fechaEntrega: user.fecha
+        }
+      );
 
       await sendMessage(
         from,
@@ -170,7 +179,7 @@ app.post("/webhook", async (req, res) => {
 // 🔹 Enviar mensajes
 async function sendMessage(to, text) {
   await axios.post(
-    `https://graph.facebook.com/v18.0/${901596696381094}/messages`,
+    `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`,
     {
       messaging_product: "whatsapp",
       to,
@@ -178,7 +187,8 @@ async function sendMessage(to, text) {
     },
     {
       headers: {
-        Authorization: `Bearer EAAUMzUbReZB0BQuNLoffAibvPtRAZAVhlG9zRK7lspn35gZBgjwU7CpCXVMSzvM6n5F3XarqHboe3W9BFnsPxZCIcLhYeMg6ogcPWnZCXh0uuUNoh65dgplXtZCoB7QzW05urBVk8CiqJ7kDujaPXDc4zPZCn9mZCy6lUp0FK1FlXqjRjm2RHB5na1JtoXbdmTpXbt2ZA9roU2UA0NR4P2WKLwH15B67vCwiZCy4CxQwDkWeNKWh1bCpOs7Ykri0ByMbLIvV1y2ZCsgRHTCgo8GChuvOhv1`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+        "Content-Type": "application/json"
       }
     }
   );
