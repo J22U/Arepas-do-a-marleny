@@ -13,7 +13,7 @@ const users = {};
 
 // 🔹 Token de WhatsApp desde .env
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const PHONE_ID = process.env.PHONE_ID; // tu ID de número de WhatsApp
+const PHONE_ID = process.env.PHONE_ID;
 
 if (!WHATSAPP_TOKEN || !PHONE_ID) {
   console.error("❌ Debes configurar WHATSAPP_TOKEN y PHONE_ID en tu .env o variables de entorno");
@@ -22,7 +22,7 @@ if (!WHATSAPP_TOKEN || !PHONE_ID) {
 
 // 🔹 Webhook verificación (Meta)
 app.get("/webhook", (req, res) => {
-  const VERIFY_TOKEN = process.env.VERIFY_TOKEN; // también en .env
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -128,7 +128,7 @@ app.post("/webhook", async (req, res) => {
       } else {
         await sendMessage(
           from,
-          "📅 ¿Para qué fecha deseas la entrega?\n\n⚠️ Recuerda: no hoy ni mañana\nEjemplo: 2026-02-05"
+          "📅 ¿Para qué fecha deseas la entrega?\n\n✅ Solo se permite desde *2 días después de hoy* hasta *7 días máximo*.\nFormato: YYYY-MM-DD\nEjemplo: 2026-02-05"
         );
         user.step = "fecha";
       }
@@ -138,7 +138,7 @@ app.post("/webhook", async (req, res) => {
       if (!fechaValida(text)) {
         await sendMessage(
           from,
-          "❌ Fecha no válida.\nDebe ser desde *pasado mañana* y máximo *7 días*."
+          "❌ Fecha no permitida.\nDebes elegir desde 2 días después de hoy y máximo 7 días."
         );
         return res.sendStatus(200);
       }
@@ -171,12 +171,12 @@ app.post("/webhook", async (req, res) => {
 
     res.sendStatus(200);
   } catch (error) {
-    console.error(error);
+    console.error("ERROR:", error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
 
-// 🔹 Enviar mensajes
+// 🔹 Enviar mensajes WhatsApp
 async function sendMessage(to, text) {
   await axios.post(
     `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`,
@@ -194,16 +194,23 @@ async function sendMessage(to, text) {
   );
 }
 
-// 🔹 Validar fecha
+// 🔹 Validar fecha dinámica (Colombia, +2 a +7 días)
 function fechaValida(fechaTexto) {
-  const hoy = new Date();
-  const fecha = new Date(fechaTexto);
 
-  const min = new Date();
-  min.setDate(hoy.getDate() + 2);
+  // Fecha actual en zona Colombia
+  const hoy = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Bogota" })
+  );
+  hoy.setHours(0, 0, 0, 0);
 
-  const max = new Date();
-  max.setDate(hoy.getDate() + 7);
+  const min = new Date(hoy);
+  min.setDate(min.getDate() + 2);
+
+  const max = new Date(hoy);
+  max.setDate(max.getDate() + 7);
+
+  const fecha = new Date(fechaTexto + "T00:00:00");
+  fecha.setHours(0, 0, 0, 0);
 
   return fecha >= min && fecha <= max;
 }
