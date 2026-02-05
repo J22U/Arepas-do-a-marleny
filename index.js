@@ -16,22 +16,14 @@ const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
 // 🔹 Precios y Productos
 const PRODUCTOS_INFO = {
-  "1": { nombre: "Telas", precio: 5000, desc: "paquete x5" },
-  "2": { nombre: "Mini telas", precio: 4000, desc: "paquete x5" },
-  "3": { nombre: "Redondas", precio: 6000, desc: "paquete x10" }
+  "1": { nombre: "Telas", precio: 3000, desc: "paquete x5" },
+  "2": { nombre: "Mini telas", precio: 3000, desc: "paquete x8" },
+  "3": { nombre: "Redondas", precio: 3000, desc: "paquete x10" }
 };
 
 const users = {};
 const timers = {};
 const msgIds = new Set();
-
-function obtenerEmoji(numero) {
-  const mapping = {
-    '0': '0️⃣', '1': '1️⃣', '2': '2️⃣', '3': '3️⃣', '4': '4️⃣',
-    '5': '5️⃣', '6': '6️⃣', '7': '7️⃣', '8': '8️⃣', '9': '9️⃣'
-  };
-  return numero.toString().split('').map(d => mapping[d]).join('');
-}
 
 app.get("/webhook", (req, res) => {
   if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
@@ -67,6 +59,7 @@ app.post("/webhook", async (req, res) => {
     if (!users[from]) users[from] = { step: "saludo" };
     const user = users[from];
 
+    // --- FLUJO DEL BOT ---
     if (user.step === "saludo") {
       await sendMessage(from, "👋 ¡Hola! Bienvenido a *Arepas Doña Marleny*.\n\n✍️ Escríbeme tu *Nombre, Apellido y Celular separados por una coma*.\n\nEjemplo: Juan Pérez, 3001234567");
       user.step = "datos";
@@ -79,8 +72,15 @@ app.post("/webhook", async (req, res) => {
       }
       user.nombre = partes[0].trim();
       user.telefono = partes[1].trim();
-      await mostrarMenuProductos(from);
-      user.step = "productos";
+      
+      // Si venía de modificar, vuelve al resumen, si no, sigue a productos
+      if (user.modificando) {
+          user.modificando = false;
+          await mostrarResumenPedido(from, user);
+      } else {
+          await mostrarMenuProductos(from);
+          user.step = "productos";
+      }
     }
 
     else if (user.step === "productos") {
@@ -117,8 +117,14 @@ app.post("/webhook", async (req, res) => {
         const siguienteProd = PRODUCTOS_INFO[user.seleccion[user.indiceActual]].nombre;
         await sendMessage(from, `¿Cuántos *paquetes* de *${siguienteProd}* deseas pedir?`);
       } else {
-        await sendMessage(from, "📅 ¿Para qué fecha deseas la entrega?\n\n✅ No se permite *pedido para hoy ni mañana*.\n\nFormato: AAAA-MM-DD\nEjemplo: 2026-02-10");
-        user.step = "fecha";
+        // Si venía de modificar productos, vuelve al resumen
+        if (user.modificando) {
+            user.modificando = false;
+            await mostrarResumenPedido(from, user);
+        } else {
+            await sendMessage(from, "📅 ¿Para qué fecha deseas la entrega?\n\n✅ No se permite *pedido para hoy ni mañana*.\n\nFormato: AAAA-MM-DD\nEjemplo: 2026-02-10");
+            user.step = "fecha";
+        }
       }
     }
 
@@ -127,6 +133,7 @@ app.post("/webhook", async (req, res) => {
         return await sendMessage(from, "❌ Fecha no válida. Debe ser entre 2 y 7 días a partir de hoy (Formato: AAAA-MM-DD).");
       }
       user.fecha = text;
+      user.modificando = false; // Reset por si venía de modificar
       await mostrarResumenPedido(from, user);
     }
 
@@ -144,7 +151,7 @@ app.post("/webhook", async (req, res) => {
       } 
       else if (text === "modificar") {
         user.step = "menu_modificar";
-        await sendMessage(from, `¿Qué deseas cambiar?\n\n1️⃣ Cambiar Productos\n2️⃣ Cambiar Fecha\n3️⃣ Reiniciar todo`);
+        await sendMessage(from, `¿Qué deseas cambiar?\n\n1️⃣ Cambiar Productos/Cantidades\n2️⃣ Cambiar Fecha de entrega\n3️⃣ Cambiar mis Datos (Nombre/Tel)\n4️⃣ Cancelar todo`);
       }
       else if (text === "cancelar") {
         await sendMessage(from, "❌ Pedido cancelado. Escribe *HOLA* para empezar de nuevo.");
@@ -153,6 +160,7 @@ app.post("/webhook", async (req, res) => {
     }
 
     else if (user.step === "menu_modificar") {
+      user.modificando = true; // Activamos la bandera de modificación
       if (text === "1") {
         await mostrarMenuProductos(from);
         user.step = "productos";
@@ -160,10 +168,13 @@ app.post("/webhook", async (req, res) => {
         await sendMessage(from, "📅 Escribe la nueva fecha (AAAA-MM-DD):");
         user.step = "fecha";
       } else if (text === "3") {
+        await sendMessage(from, "✍️ Escríbeme tu nuevo *Nombre, Apellido y Celular* (separados por coma):");
+        user.step = "datos";
+      } else if (text === "4") {
         delete users[from];
-        await sendMessage(from, "Escribe *HOLA* para reiniciar.");
+        await sendMessage(from, "Pedido cancelado. Escribe *HOLA* para reiniciar.");
       } else {
-        await sendMessage(from, "❌ Elige una opción (1-3)");
+        await sendMessage(from, "❌ Elige una opción (1-4)");
       }
     }
 
@@ -191,10 +202,8 @@ async function mostrarResumenPedido(from, user) {
   await sendMessage(from, `✅ *RESUMEN DE TU PEDIDO*\n\n👤 Cliente: ${user.nombre}\n📞 Teléfono: ${user.telefono}\n📅 Entrega: ${user.fecha}\n\n🫓 *Detalle:*\n${lista}\n💰 *TOTAL A PAGAR: $${total}*\n\n¿Los datos son correctos?\n👍 Responde *SI* para confirmar\n🔄 Responde *MODIFICAR*\n❌ Responde *CANCELAR*`);
 }
 
-// 🔹 ESTA ES LA FUNCIÓN QUE CORREGIMOS 🔹
 async function enviarAGoogleSheets(user) {
   try {
-    // Convertimos el objeto en texto legible para la tabla
     const resumenProductos = user.pedido.map(item => `${item.nombre} (${item.cantidad})`).join(", ");
     const resumenCantidades = user.pedido.map(item => item.cantidad).join(", ");
     const totalVenta = user.pedido.reduce((acc, item) => acc + item.subtotal, 0);
@@ -202,11 +211,11 @@ async function enviarAGoogleSheets(user) {
     const res = await axios.post(GOOGLE_SHEET_WEBHOOK, {
       nombre: user.nombre,
       telefono: user.telefono,
-      pedido: resumenProductos,   // Texto limpio para Columna D
-      paquetes: resumenCantidades, // Texto limpio para Columna E
-      total: totalVenta,           // Valor para Columna F
-      fechaEntrega: user.fecha     // Fecha para Columna G
-    }, { timeout: 8000 });
+      pedido: resumenProductos,
+      paquetes: resumenCantidades,
+      total: totalVenta,
+      fechaEntrega: user.fecha
+    }, { timeout: 15000 });
     return true;
   } catch (e) {
     console.error("Error al enviar a Sheets:", e.message);
@@ -225,15 +234,12 @@ async function sendMessage(to, text) {
 function fechaValida(fechaTexto) {
   const hoy = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Bogota" }));
   hoy.setHours(0, 0, 0, 0);
-
   const min = new Date(hoy);
   min.setDate(min.getDate() + 2);
   const max = new Date(hoy);
   max.setDate(max.getDate() + 7);
-
   const fechaParts = fechaTexto.split('-');
   if(fechaParts.length !== 3) return false;
-  
   const fecha = new Date(fechaTexto + "T00:00:00");
   return fecha >= min && fecha <= max;
 }
