@@ -119,7 +119,7 @@ app.post("/webhook", async (req, res) => {
         const siguienteProd = PRODUCTOS_INFO[user.seleccion[user.indiceActual]].nombre;
         await sendMessage(from, `¿Cuántos *paquetes* de *${siguienteProd}* deseas pedir?`);
       } else {
-        await sendMessage(from, "📅 ¿Para qué fecha deseas la entrega?\n\n✅ Solo se permite desde *2 días después de hoy* hasta *7 días máximo*.\n\nFormato: AAAA-MM-DD\nEjemplo: 2026-02-10");
+        await sendMessage(from, "📅 ¿Para qué fecha deseas la entrega?\n\n✅ No se permite *pedido para hoy ni mañana*.\n\nFormato: AAAA-MM-DD\nEjemplo: 2026-02-10");
         user.step = "fecha";
       }
     }
