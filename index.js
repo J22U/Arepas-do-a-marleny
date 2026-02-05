@@ -55,7 +55,6 @@ app.post("/webhook", async (req, res) => {
     const text = msg.text?.body?.toLowerCase().trim();
     if (!text) return;
 
-    // --- TEMPORIZADOR DE INACTIVIDAD (5 MIN) ---
     if (timers[from]) clearTimeout(timers[from]);
     timers[from] = setTimeout(async () => {
       if (users[from]) {
@@ -68,7 +67,6 @@ app.post("/webhook", async (req, res) => {
     if (!users[from]) users[from] = { step: "saludo" };
     const user = users[from];
 
-    // --- FLUJO DEL BOT ---
     if (user.step === "saludo") {
       await sendMessage(from, "👋 ¡Hola! Bienvenido a *Arepas Doña Marleny*.\n\n✍️ Escríbeme tu *Nombre, Apellido y Celular separados por una coma*.\n\nEjemplo: Juan Pérez, 3001234567");
       user.step = "datos";
@@ -193,17 +191,25 @@ async function mostrarResumenPedido(from, user) {
   await sendMessage(from, `✅ *RESUMEN DE TU PEDIDO*\n\n👤 Cliente: ${user.nombre}\n📞 Teléfono: ${user.telefono}\n📅 Entrega: ${user.fecha}\n\n🫓 *Detalle:*\n${lista}\n💰 *TOTAL A PAGAR: $${total}*\n\n¿Los datos son correctos?\n👍 Responde *SI* para confirmar\n🔄 Responde *MODIFICAR*\n❌ Responde *CANCELAR*`);
 }
 
+// 🔹 ESTA ES LA FUNCIÓN QUE CORREGIMOS 🔹
 async function enviarAGoogleSheets(user) {
   try {
+    // Convertimos el objeto en texto legible para la tabla
+    const resumenProductos = user.pedido.map(item => `${item.nombre} (${item.cantidad})`).join(", ");
+    const resumenCantidades = user.pedido.map(item => item.cantidad).join(", ");
+    const totalVenta = user.pedido.reduce((acc, item) => acc + item.subtotal, 0);
+
     const res = await axios.post(GOOGLE_SHEET_WEBHOOK, {
       nombre: user.nombre,
       telefono: user.telefono,
-      pedido: JSON.stringify(user.pedido),
-      total: user.pedido.reduce((acc, item) => acc + item.subtotal, 0),
-      fechaEntrega: user.fecha
+      pedido: resumenProductos,   // Texto limpio para Columna D
+      paquetes: resumenCantidades, // Texto limpio para Columna E
+      total: totalVenta,           // Valor para Columna F
+      fechaEntrega: user.fecha     // Fecha para Columna G
     }, { timeout: 8000 });
     return true;
   } catch (e) {
+    console.error("Error al enviar a Sheets:", e.message);
     return false;
   }
 }
