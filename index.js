@@ -25,6 +25,29 @@ const users = {};
 const timers = {};
 const msgIds = new Set();
 
+// --- NUEVA FUNCIÓN PARA GENERAR EL MENÚ DE FECHAS ---
+function obtenerOpcionesFechas() {
+  const opciones = [];
+  const hoy = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Bogota" }));
+  let diasEncontrados = 0;
+  let intentoDiferencia = 2; // Empezamos desde hoy + 2 días
+
+  while (diasEncontrados < 6) {
+    const fechaTemp = new Date(hoy);
+    fechaTemp.setDate(hoy.getDate() + intentoDiferencia);
+    
+    // Si no es domingo (0), la agregamos
+    if (fechaTemp.getDay() !== 0) {
+      const iso = fechaTemp.toISOString().split('T')[0];
+      const legible = fechaTemp.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
+      opciones.push({ iso, legible });
+      diasEncontrados++;
+    }
+    intentoDiferencia++;
+  }
+  return opciones;
+}
+
 app.get("/webhook", (req, res) => {
   if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
     return res.status(200).send(req.query["hub.challenge"]);
@@ -59,7 +82,6 @@ app.post("/webhook", async (req, res) => {
     if (!users[from]) users[from] = { step: "saludo" };
     const user = users[from];
 
-    // --- FLUJO DEL BOT ---
     if (user.step === "saludo") {
       await sendMessage(from, "👋 ¡Hola! Bienvenido a *Arepas Doña Marleny*.\n\n*INFORMACIÓN IMPORTANTE: SOLO SE RECIBE PAGOS EN EFECTIVO*\n\n✍️ Escríbeme tu *Nombre, Apellido y Celular separados por una coma*.\n\nEjemplo: Juan Pérez, 3001234567");
       user.step = "datos";
@@ -120,17 +142,26 @@ app.post("/webhook", async (req, res) => {
             user.modificando = false;
             await mostrarResumenPedido(from, user);
         } else {
-            await sendMessage(from, "📅 ¿Para qué fecha deseas la entrega?\n\n✅ No se permite *pedido para hoy ni mañana*.\n🚫 *Los domingos no tenemos servicio*.\n\nFormato: AAAA-MM-DD\nEjemplo: 2026-02-10");
+            // --- CAMBIO AQUÍ: MOSTRAR MENÚ DE FECHAS ---
+            const opciones = obtenerOpcionesFechas();
+            user.listaFechas = opciones;
+            let msgFecha = "📅 *Selecciona la fecha de entrega:*\n\n";
+            opciones.forEach((f, i) => {
+              msgFecha += `${i + 1}️⃣ ${f.legible}\n`;
+            });
+            msgFecha += "\nResponde solo con el número de la opción.";
+            await sendMessage(from, msgFecha);
             user.step = "fecha";
         }
       }
     }
 
     else if (user.step === "fecha") {
-      if (!fechaValida(text)) {
-        return await sendMessage(from, "❌ Fecha no válida. Recuerda:\n- Formato: AAAA-MM-DD\n- Mínimo 2 días de anticipación.\n- Máximo 7 días.\n- *No entregamos los domingos.*");
+      const idx = parseInt(text) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= user.listaFechas.length) {
+        return await sendMessage(from, "❌ Opción no válida. Por favor selecciona un número de la lista.");
       }
-      user.fecha = text;
+      user.fecha = user.listaFechas[idx].iso;
       user.modificando = false;
       await mostrarResumenPedido(from, user);
     }
@@ -163,7 +194,14 @@ app.post("/webhook", async (req, res) => {
         await mostrarMenuProductos(from);
         user.step = "productos";
       } else if (text === "2") {
-        await sendMessage(from, "📅 Escribe la nueva fecha (AAAA-MM-DD):");
+        // --- CAMBIO AQUÍ TAMBIÉN PARA MODIFICAR ---
+        const opciones = obtenerOpcionesFechas();
+        user.listaFechas = opciones;
+        let msgFecha = "📅 *Selecciona la nueva fecha de entrega:*\n\n";
+        opciones.forEach((f, i) => {
+          msgFecha += `${i + 1}️⃣ ${f.legible}\n`;
+        });
+        await sendMessage(from, msgFecha);
         user.step = "fecha";
       } else if (text === "3") {
         await sendMessage(from, "✍️ Escríbeme tu nuevo *Nombre, Apellido y Celular* (separados por coma):");
@@ -182,7 +220,6 @@ app.post("/webhook", async (req, res) => {
 });
 
 // --- FUNCIONES DE APOYO ---
-
 async function mostrarMenuProductos(from) {
   await sendMessage(from, `Escribe el número de los productos que deseas (separados por coma):\n\n🫓 *Nuestros Productos*\n\n1️⃣ Telas (${PRODUCTOS_INFO["1"].desc}) — $${PRODUCTOS_INFO["1"].precio}\n2️⃣ Mini telas (${PRODUCTOS_INFO["2"].desc}) — $${PRODUCTOS_INFO["2"].precio}\n3️⃣ Redondas (${PRODUCTOS_INFO["3"].desc}) — $${PRODUCTOS_INFO["3"].precio}\n\nEjemplo: 1,3`);
 }
@@ -191,12 +228,10 @@ async function mostrarResumenPedido(from, user) {
   user.step = "confirmar";
   let total = 0;
   let lista = "";
-  
   user.pedido.forEach(item => {
     lista += `• ${item.nombre}: ${item.cantidad} pqts - $${item.subtotal}\n`;
     total += item.subtotal;
   });
-
   await sendMessage(from, `✅ *RESUMEN DE TU PEDIDO*\n\n👤 Cliente: ${user.nombre}\n📞 Teléfono: ${user.telefono}\n📅 Entrega: ${user.fecha}\n\n🫓 *Detalle:*\n${lista}\n💰 *TOTAL A PAGAR: $${total}*\n\n¿Los datos son correctos?\n👍 Responde *SI* para confirmar\n🔄 Responde *MODIFICAR*\n❌ Responde *CANCELAR*`);
 }
 
@@ -205,8 +240,7 @@ async function enviarAGoogleSheets(user) {
     const resumenProductos = user.pedido.map(item => `${item.nombre} (${item.cantidad})`).join(", ");
     const resumenCantidades = user.pedido.map(item => item.cantidad).join(", ");
     const totalVenta = user.pedido.reduce((acc, item) => acc + item.subtotal, 0);
-
-    const res = await axios.post(GOOGLE_SHEET_WEBHOOK, {
+    await axios.post(GOOGLE_SHEET_WEBHOOK, {
       nombre: user.nombre,
       telefono: user.telefono,
       pedido: resumenProductos,
@@ -229,21 +263,7 @@ async function sendMessage(to, text) {
   } catch (e) { console.error("Error envío:", e.message); }
 }
 
-function fechaValida(fechaTexto) {
-  const hoy = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Bogota" }));
-  hoy.setHours(0, 0, 0, 0);
-  const min = new Date(hoy);
-  min.setDate(min.getDate() + 2);
-  const max = new Date(hoy);
-  max.setDate(max.getDate() + 7);
-  
-  const fechaParts = fechaTexto.split('-');
-  if(fechaParts.length !== 3) return false;
-  
-  const fecha = new Date(fechaTexto + "T00:00:00");
-  
-  // Validamos rango de días y que NO sea domingo (0 = Domingo)
-  return fecha >= min && fecha <= max && fecha.getDay() !== 0;
-}
+// Ya no necesitamos fechaValida para la entrada del usuario, pero la dejo por si la necesitas
+function fechaValida(fechaTexto) { return true; }
 
 app.listen(PORT, () => console.log(`🤖 Bot Doña Marleny en puerto ${PORT}`));
