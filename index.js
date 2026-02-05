@@ -81,8 +81,7 @@ app.post("/webhook", async (req, res) => {
       }
       user.nombre = partes[0].trim();
       user.telefono = partes[1].trim();
-
-      await sendMessage(from, `Escribe el número de los productos que deseas (separados por coma):\n\n🫓 *Nuestros Productos*\n\n1️⃣ Telas (${PRODUCTOS_INFO["1"].desc}) — $${PRODUCTOS_INFO["1"].precio}\n2️⃣ Mini telas (${PRODUCTOS_INFO["2"].desc}) — $${PRODUCTOS_INFO["2"].precio}\n3️⃣ Redondas (${PRODUCTOS_INFO["3"].desc}) — $${PRODUCTOS_INFO["3"].precio}\n\nEjemplo: 1,3`);
+      await mostrarMenuProductos(from);
       user.step = "productos";
     }
 
@@ -144,9 +143,29 @@ app.post("/webhook", async (req, res) => {
         } else {
           await sendMessage(from, "❌ Hubo un error al guardar. Escribe *SI* para reintentar.");
         }
-      } else if (text === "cancelar") {
+      } 
+      else if (text === "modificar") {
+        user.step = "menu_modificar";
+        await sendMessage(from, `¿Qué deseas cambiar?\n\n1️⃣ Cambiar Productos\n2️⃣ Cambiar Fecha\n3️⃣ Reiniciar todo`);
+      }
+      else if (text === "cancelar") {
         await sendMessage(from, "❌ Pedido cancelado. Escribe *HOLA* para empezar de nuevo.");
         delete users[from];
+      }
+    }
+
+    else if (user.step === "menu_modificar") {
+      if (text === "1") {
+        await mostrarMenuProductos(from);
+        user.step = "productos";
+      } else if (text === "2") {
+        await sendMessage(from, "📅 Escribe la nueva fecha (AAAA-MM-DD):");
+        user.step = "fecha";
+      } else if (text === "3") {
+        delete users[from];
+        await sendMessage(from, "Escribe *HOLA* para reiniciar.");
+      } else {
+        await sendMessage(from, "❌ Elige una opción (1-3)");
       }
     }
 
@@ -156,6 +175,10 @@ app.post("/webhook", async (req, res) => {
 });
 
 // --- FUNCIONES DE APOYO ---
+
+async function mostrarMenuProductos(from) {
+  await sendMessage(from, `Escribe el número de los productos que deseas (separados por coma):\n\n🫓 *Nuestros Productos*\n\n1️⃣ Telas (${PRODUCTOS_INFO["1"].desc}) — $${PRODUCTOS_INFO["1"].precio}\n2️⃣ Mini telas (${PRODUCTOS_INFO["2"].desc}) — $${PRODUCTOS_INFO["2"].precio}\n3️⃣ Redondas (${PRODUCTOS_INFO["3"].desc}) — $${PRODUCTOS_INFO["3"].precio}\n\nEjemplo: 1,3`);
+}
 
 async function mostrarResumenPedido(from, user) {
   user.step = "confirmar";
@@ -167,7 +190,7 @@ async function mostrarResumenPedido(from, user) {
     total += item.subtotal;
   });
 
-  await sendMessage(from, `✅ *RESUMEN DE TU PEDIDO*\n\n👤 Cliente: ${user.nombre}\n📞 Teléfono: ${user.telefono}\n📅 Entrega: ${user.fecha}\n\n🫓 *Detalle:*\n${lista}\n💰 *TOTAL A PAGAR: $${total}*\n\n¿Los datos son correctos?\n👍 Responde *SI* para confirmar\n❌ Responde *CANCELAR*`);
+  await sendMessage(from, `✅ *RESUMEN DE TU PEDIDO*\n\n👤 Cliente: ${user.nombre}\n📞 Teléfono: ${user.telefono}\n📅 Entrega: ${user.fecha}\n\n🫓 *Detalle:*\n${lista}\n💰 *TOTAL A PAGAR: $${total}*\n\n¿Los datos son correctos?\n👍 Responde *SI* para confirmar\n🔄 Responde *MODIFICAR*\n❌ Responde *CANCELAR*`);
 }
 
 async function enviarAGoogleSheets(user) {
