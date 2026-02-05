@@ -8,213 +8,205 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// 🔹 Memoria temporal (MVP)
-const users = {};
-
-// 🔹 Token de WhatsApp desde .env
+// 🔹 Configuración
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_ID = process.env.PHONE_ID;
+const GOOGLE_SHEET_WEBHOOK = process.env.GOOGLE_SHEET_WEBHOOK;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-if (!WHATSAPP_TOKEN || !PHONE_ID) {
-  console.error("❌ Debes configurar WHATSAPP_TOKEN y PHONE_ID en tu .env o variables de entorno");
-  process.exit(1);
+// 🔹 Precios y Productos
+const PRODUCTOS_INFO = {
+  "1": { nombre: "Telas", precio: 5000, desc: "paquete x5" },
+  "2": { nombre: "Mini telas", precio: 4000, desc: "paquete x5" },
+  "3": { nombre: "Redondas", precio: 6000, desc: "paquete x10" }
+};
+
+const users = {};
+const timers = {};
+const msgIds = new Set();
+
+function obtenerEmoji(numero) {
+  const mapping = {
+    '0': '0️⃣', '1': '1️⃣', '2': '2️⃣', '3': '3️⃣', '4': '4️⃣',
+    '5': '5️⃣', '6': '6️⃣', '7': '7️⃣', '8': '8️⃣', '9': '9️⃣'
+  };
+  return numero.toString().split('').map(d => mapping[d]).join('');
 }
 
-// 🔹 Webhook verificación (Meta)
 app.get("/webhook", (req, res) => {
-  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verificado");
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+  if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
+    return res.status(200).send(req.query["hub.challenge"]);
   }
+  res.sendStatus(403);
 });
 
-// 🔹 Webhook mensajes
 app.post("/webhook", async (req, res) => {
+  const value = req.body.entry?.[0]?.changes?.[0]?.value;
+  const msg = value?.messages?.[0];
+
+  if (!msg || !msg.id || msgIds.has(msg.id)) return res.sendStatus(200);
+  msgIds.add(msg.id);
+  setTimeout(() => msgIds.delete(msg.id), 10000);
+
+  res.sendStatus(200);
+
   try {
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const message = changes?.value?.messages?.[0];
+    const from = msg.from;
+    const text = msg.text?.body?.toLowerCase().trim();
+    if (!text) return;
 
-    if (!message) {
-      return res.sendStatus(200);
-    }
+    // --- TEMPORIZADOR DE INACTIVIDAD (5 MIN) ---
+    if (timers[from]) clearTimeout(timers[from]);
+    timers[from] = setTimeout(async () => {
+      if (users[from]) {
+        delete users[from];
+        await sendMessage(from, "⏰ *Sesión finalizada por inactividad.*\n\nSi deseas hacer un pedido, escribe *HOLA* de nuevo.");
+      }
+    }, 5 * 60 * 1000);
 
-    const from = message.from;
-    const text = message.text?.body?.toLowerCase();
-
-    if (!users[from]) {
-      users[from] = { step: "saludo" };
-    }
-
+    if (text === "hola" || text === "inicio") delete users[from];
+    if (!users[from]) users[from] = { step: "saludo" };
     const user = users[from];
 
-    // 🔹 FLUJO DEL BOT
+    // --- FLUJO DEL BOT ---
     if (user.step === "saludo") {
-      await sendMessage(
-        from,
-        "👋 ¡Hola! Bienvenido a *Arepas Doña Marleny*.\n\n✍️ Escríbeme tu *nombre y número de teléfono* separados por coma.\nEjemplo:\nJuan Pérez, 3001234567"
-      );
+      await sendMessage(from, "👋 ¡Hola! Bienvenido a *Arepas Doña Marleny*.\n\n✍️ Escríbeme tu *Nombre, Apellido y Celular separados por una coma*.\n\nEjemplo: Juan Pérez, 3001234567");
       user.step = "datos";
     }
 
     else if (user.step === "datos") {
       const partes = text.split(",");
-
       if (partes.length < 2) {
-        await sendMessage(
-          from,
-          "❌ Formato incorrecto.\nEscribe:\nNombre, Teléfono\nEjemplo:\nJuan Pérez, 3001234567"
-        );
-        return res.sendStatus(200);
+        return await sendMessage(from, "❌ Formato incorrecto. Usa: Nombre, Teléfono");
       }
-
       user.nombre = partes[0].trim();
       user.telefono = partes[1].trim();
 
-      await sendMessage(
-        from,
-        "🫓 *Presentación de productos*\n\n• Telas → paquete x5\n• Mini telas → paquete x5\n• Redondas → paquete x10\n\n¿Qué deseas pedir?\n\n1️⃣ Telas\n2️⃣ Mini telas\n3️⃣ Redondas\n\n✍️ Puedes escribir por ejemplo: 1,2"
-      );
-
+      await sendMessage(from, `Escribe el número de los productos que deseas (separados por coma):\n\n🫓 *Nuestros Productos*\n\n1️⃣ Telas (${PRODUCTOS_INFO["1"].desc}) — $${PRODUCTOS_INFO["1"].precio}\n2️⃣ Mini telas (${PRODUCTOS_INFO["2"].desc}) — $${PRODUCTOS_INFO["2"].precio}\n3️⃣ Redondas (${PRODUCTOS_INFO["3"].desc}) — $${PRODUCTOS_INFO["3"].precio}\n\nEjemplo: 1,3`);
       user.step = "productos";
     }
 
     else if (user.step === "productos") {
       const opciones = text.split(",").map(o => o.trim());
+      user.seleccion = opciones.filter(o => PRODUCTOS_INFO[o]);
 
-      const mapa = {
-        "1": "Telas",
-        "2": "Mini telas",
-        "3": "Redondas"
-      };
-
-      user.productos = opciones.map(o => mapa[o]).filter(Boolean);
-
-      if (user.productos.length === 0) {
-        await sendMessage(from, "❌ Opción no válida. Usa 1, 2 o 3.");
-        return res.sendStatus(200);
+      if (user.seleccion.length === 0) {
+        return await sendMessage(from, "❌ Opción no válida. Elige 1, 2 o 3.");
       }
 
-      user.cantidades = {};
-      user.productoActual = 0;
-
-      await sendMessage(
-        from,
-        `¿Cuántos *paquetes* de *${user.productos[0]}* deseas pedir?`
-      );
-
-      user.step = "cantidad_por_producto";
+      user.pedido = [];
+      user.indiceActual = 0;
+      const primerProd = PRODUCTOS_INFO[user.seleccion[0]].nombre;
+      await sendMessage(from, `¿Cuántos *paquetes* de *${primerProd}* deseas pedir?`);
+      user.step = "cantidades";
     }
 
-    else if (user.step === "cantidad_por_producto") {
-      const producto = user.productos[user.productoActual];
-      user.cantidades[producto] = text;
+    else if (user.step === "cantidades") {
+      const cantidad = parseInt(text);
+      if (isNaN(cantidad) || cantidad <= 0) {
+        return await sendMessage(from, "❌ Por favor, ingresa un número válido de paquetes.");
+      }
 
-      user.productoActual++;
+      const infoProd = PRODUCTOS_INFO[user.seleccion[user.indiceActual]];
+      user.pedido.push({
+        nombre: infoProd.nombre,
+        cantidad: cantidad,
+        subtotal: infoProd.precio * cantidad
+      });
 
-      if (user.productoActual < user.productos.length) {
-        await sendMessage(
-          from,
-          `¿Cuántos *paquetes* de *${user.productos[user.productoActual]}* deseas pedir?`
-        );
+      user.indiceActual++;
+
+      if (user.indiceActual < user.seleccion.length) {
+        const siguienteProd = PRODUCTOS_INFO[user.seleccion[user.indiceActual]].nombre;
+        await sendMessage(from, `¿Cuántos *paquetes* de *${siguienteProd}* deseas pedir?`);
       } else {
-        await sendMessage(
-          from,
-          "📅 ¿Para qué fecha deseas la entrega?\n\n✅ Solo se permite desde *2 días después de hoy* hasta *7 días máximo*.\nFormato: YYYY-MM-DD\nEjemplo: 2026-02-05"
-        );
+        await sendMessage(from, "📅 ¿Para qué fecha deseas la entrega?\n\n✅ Solo se permite desde *2 días después de hoy* hasta *7 días máximo*.\n\nFormato: AAAA-MM-DD\nEjemplo: 2026-02-10");
         user.step = "fecha";
       }
     }
 
     else if (user.step === "fecha") {
       if (!fechaValida(text)) {
-        await sendMessage(
-          from,
-          "❌ Fecha no permitida.\nDebes elegir desde 2 días después de hoy y máximo 7 días."
-        );
-        return res.sendStatus(200);
+        return await sendMessage(from, "❌ Fecha no válida. Debe ser entre 2 y 7 días a partir de hoy (Formato: AAAA-MM-DD).");
       }
-
       user.fecha = text;
-
-      let resumen = "";
-      for (const prod in user.cantidades) {
-        resumen += `• ${prod}: ${user.cantidades[prod]} paquetes\n`;
-      }
-
-      // 🔹 Enviar a Google Sheets
-      await axios.post(
-        process.env.GOOGLE_SHEET_WEBHOOK,
-        {
-          nombre: user.nombre,
-          telefono: user.telefono,
-          pedido: user.cantidades,
-          fechaEntrega: user.fecha
-        }
-      );
-
-      await sendMessage(
-        from,
-        `✅ *Pedido confirmado*\n\n👤 Nombre: ${user.nombre}\n📞 Teléfono: ${user.telefono}\n\n🫓 Pedido:\n${resumen}\n📅 Fecha: ${user.fecha}\n\n🙏 Gracias por tu pedido`
-      );
-
-      delete users[from];
+      await mostrarResumenPedido(from, user);
     }
 
-    res.sendStatus(200);
+    else if (user.step === "confirmar") {
+      if (text === "si") {
+        await sendMessage(from, "⏳ Procesando tu pedido...");
+        const exito = await enviarAGoogleSheets(user);
+        if (exito) {
+          await sendMessage(from, `🎉 *¡Pedido Confirmado!*\n\nGracias ${user.nombre}, estaremos entregando tus arepas el día ${user.fecha}. ¡Buen día!`);
+          delete users[from];
+          if (timers[from]) clearTimeout(timers[from]);
+        } else {
+          await sendMessage(from, "❌ Hubo un error al guardar. Escribe *SI* para reintentar.");
+        }
+      } else if (text === "cancelar") {
+        await sendMessage(from, "❌ Pedido cancelado. Escribe *HOLA* para empezar de nuevo.");
+        delete users[from];
+      }
+    }
+
   } catch (error) {
-    console.error("ERROR:", error.response?.data || error.message);
-    res.sendStatus(500);
+    console.error("ERROR WEBHOOK:", error.message);
   }
 });
 
-// 🔹 Enviar mensajes WhatsApp
-async function sendMessage(to, text) {
-  await axios.post(
-    `https://graph.facebook.com/v18.0/${PHONE_ID}/messages`,
-    {
-      messaging_product: "whatsapp",
-      to,
-      text: { body: text }
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-        "Content-Type": "application/json"
-      }
-    }
-  );
+// --- FUNCIONES DE APOYO ---
+
+async function mostrarResumenPedido(from, user) {
+  user.step = "confirmar";
+  let total = 0;
+  let lista = "";
+  
+  user.pedido.forEach(item => {
+    lista += `• ${item.nombre}: ${item.cantidad} pqts - $${item.subtotal}\n`;
+    total += item.subtotal;
+  });
+
+  await sendMessage(from, `✅ *RESUMEN DE TU PEDIDO*\n\n👤 Cliente: ${user.nombre}\n📞 Teléfono: ${user.telefono}\n📅 Entrega: ${user.fecha}\n\n🫓 *Detalle:*\n${lista}\n💰 *TOTAL A PAGAR: $${total}*\n\n¿Los datos son correctos?\n👍 Responde *SI* para confirmar\n❌ Responde *CANCELAR*`);
 }
 
-// 🔹 Validar fecha dinámica (Colombia, +2 a +7 días)
-function fechaValida(fechaTexto) {
+async function enviarAGoogleSheets(user) {
+  try {
+    const res = await axios.post(GOOGLE_SHEET_WEBHOOK, {
+      nombre: user.nombre,
+      telefono: user.telefono,
+      pedido: JSON.stringify(user.pedido),
+      total: user.pedido.reduce((acc, item) => acc + item.subtotal, 0),
+      fechaEntrega: user.fecha
+    }, { timeout: 8000 });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
-  // Fecha actual en zona Colombia
-  const hoy = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "America/Bogota" })
-  );
+async function sendMessage(to, text) {
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+      messaging_product: "whatsapp", to, text: { body: text }
+    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
+  } catch (e) { console.error("Error envío:", e.message); }
+}
+
+function fechaValida(fechaTexto) {
+  const hoy = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Bogota" }));
   hoy.setHours(0, 0, 0, 0);
 
   const min = new Date(hoy);
   min.setDate(min.getDate() + 2);
-
   const max = new Date(hoy);
   max.setDate(max.getDate() + 7);
 
+  const fechaParts = fechaTexto.split('-');
+  if(fechaParts.length !== 3) return false;
+  
   const fecha = new Date(fechaTexto + "T00:00:00");
-  fecha.setHours(0, 0, 0, 0);
-
   return fecha >= min && fecha <= max;
 }
 
-app.listen(PORT, () => {
-  console.log(`🤖 Bot activo en puerto ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🤖 Bot Doña Marleny en puerto ${PORT}`));
