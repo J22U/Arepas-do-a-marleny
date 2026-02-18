@@ -8,7 +8,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// 🔹 Configuración
+// 🔹 Configuración (Sincronizada con tus variables de Render)
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_ID = process.env.PHONE_ID;
 const GOOGLE_SHEET_WEBHOOK = process.env.GOOGLE_SHEET_WEBHOOK;
@@ -142,7 +142,6 @@ app.post("/webhook", async (req, res) => {
             user.modificando = false;
             await mostrarResumenPedido(from, user);
         } else {
-            // --- CAMBIO AQUÍ: MOSTRAR MENÚ DE FECHAS ---
             const opciones = obtenerOpcionesFechas();
             user.listaFechas = opciones;
             let msgFecha = "📅 *Selecciona la fecha de entrega:*\n\n";
@@ -194,7 +193,6 @@ app.post("/webhook", async (req, res) => {
         await mostrarMenuProductos(from);
         user.step = "productos";
       } else if (text === "2") {
-        // --- CAMBIO AQUÍ TAMBIÉN PARA MODIFICAR ---
         const opciones = obtenerOpcionesFechas();
         user.listaFechas = opciones;
         let msgFecha = "📅 *Selecciona la nueva fecha de entrega:*\n\n";
@@ -257,13 +255,19 @@ async function enviarAGoogleSheets(user) {
 
 async function sendMessage(to, text) {
   try {
+    // IMPORTANTE: Limpiamos el '+' del número de destino para evitar Error 400
+    const cleanTo = to.replace('+', '');
+    
     await axios.post(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
-      messaging_product: "whatsapp", to, text: { body: text }
-    }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
-  } catch (e) { console.error("Error envío:", e.message); }
+      messaging_product: "whatsapp", 
+      to: cleanTo, 
+      text: { body: text }
+    }, { 
+      headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } 
+    });
+  } catch (e) { 
+    console.error("Error envío:", e.response?.data || e.message); 
+  }
 }
-
-// Ya no necesitamos fechaValida para la entrada del usuario, pero la dejo por si la necesitas
-function fechaValida(fechaTexto) { return true; }
 
 app.listen(PORT, () => console.log(`🤖 Bot Doña Marleny en puerto ${PORT}`));
