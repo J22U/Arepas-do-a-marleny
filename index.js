@@ -257,7 +257,7 @@ async function enviarAGoogleSheets(user) {
 
 async function sendMessage(to, text) {
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_ID}/messages`, {
+    await axios.post(`https://graph.facebook.com/v21.0/${PHONE_ID}/messages`, {
       messaging_product: "whatsapp", to, text: { body: text }
     }, { headers: { Authorization: `Bearer ${WHATSAPP_TOKEN}` } });
   } catch (e) { console.error("Error envío:", e.message); }
