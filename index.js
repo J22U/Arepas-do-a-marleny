@@ -83,7 +83,7 @@ app.post("/webhook", async (req, res) => {
     const user = users[from];
 
     if (user.step === "saludo") {
-      await sendMessage(from, "👋 ¡Hola! Bienvenido a *Arepas Doña Marleny*.\n\n*INFORMACIÓN IMPORTANTE: SOLO SE RECIBE PAGOS EN EFECTIVO*\n\n✍️ Escríbeme tu *Nombre, Apellido y Celular separados por una coma*.\n\nEjemplo: Juan Pérez, 3001234567");
+      await sendMessage(from, "👋 ¡Hola! Bienvenido a *Leña y Sabor*.\n\n*INFORMACIÓN IMPORTANTE: SOLO SE RECIBE PAGOS EN EFECTIVO*\n\n✍️ Escríbeme tu *Nombre, Apellido y Celular separados por una coma*.\n\nEjemplo: Juan Pérez, 3001234567");
       user.step = "datos";
     }
 
